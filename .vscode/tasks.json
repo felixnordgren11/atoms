@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-g", "src/atom.cpp", "-o", "atom.exe",
+        "-lglew32", "-lglfw3", "-lopengl32", "-lgdi32"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "C:/msys64/usr/bin/bash.exe",
+          "args": ["-lc"]
+        },
+        "env": {
+          "MSYSTEM": "UCRT64",
+          "CHERE_INVOKING": "1"
+        }
+      },
+      "group": { "kind": "build", "isDefault": true }
+    }
+  ]
+}
