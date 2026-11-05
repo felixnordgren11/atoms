@@ -15,7 +15,7 @@
 using namespace glm;
 using namespace std;
 
-
+float orbitDistance = 35.0;
 
 struct Engine {
 
@@ -59,48 +59,103 @@ struct Engine {
     };
 };
 
-float orbitDistance = 100.0;
 
+
+/*
+********* General Particle struct *********
+*/
 struct Particle {
     vec2 pos;
     int charge;
     float angle;
+    int n = 1; // energy level of particle. for hydrogen, energy of a level is -13.6/n**2 eV
 
     Particle(vec2 pos, int charge, float angle = 0.0f) : pos(pos), charge(charge), angle(angle) {}
 
     void draw (int segments = 50) {
 
-        float r;
-        if (charge == -1){ r = 1.5f; glColor3f(0.0f, 0.7f, 1.0f);}
-        else if (charge == 1) {r = 7.0f; glColor3f(1.0f, 0.0f, 0.0f);}
-        else {r = 7.0f; glColor3f(0.5f, 0.5f, 0.5f);}
+        // Draw outline for orbit
+        glLineWidth(0.4f);
+        glBegin(GL_LINE_LOOP);
+        glColor3f(0.4f, 0.4f, 0.4f);
+        if (charge==1) {for (int i = 0; i <= segments; i++) {
+            float angle = 2.0f * M_PI * i/segments;
+            float x = orbitDistance * cos(angle);
+            float y = orbitDistance * sin(angle);
+            glVertex2f(x + pos.x, y + pos.y);
+        }; glEnd();}
 
+
+
+        float r;
+        if      (charge == -1)   {r = 1.5f; glColor3f(0.0f, 0.7f, 1.0f);}
+        else if (charge ==  1)   {r = 7.0f; glColor3f(1.0f, 0.0f, 0.0f);}
+        else                     {r = 7.0f; glColor3f(0.5f, 0.5f, 0.5f);}
+        
         glBegin(GL_TRIANGLE_FAN);
         glVertex2f(pos.x, pos.y);
-
         for (int i = 0; i <= segments; i++) {
             float angle = 2.0f * M_PI * i/segments;
             float x = r * cos(angle);
             float y = r * sin(angle);
             glVertex2f(x + pos.x, y + pos.y);
-        }
-
-        glEnd();
+        }; glEnd();
     }
     
     
     void update (vec2 center) {
-        angle += 0.00005;
-        pos= vec2(cos(angle) * orbitDistance + center.x,
-                  sin(angle) * orbitDistance + center.y);
+        float r = n * orbitDistance;
+        angle += 0.001;
+        pos= vec2(cos(angle) * r + center.x,
+                  sin(angle) * r + center.y);
     }
 
 };
 
+/* 
+********* Wave structs *********
+*/
+struct WavePoint {vec2 localPos; vec2 dir;};
+struct Wave {
+
+    // Variables
+    vec2 pos, dir;
+    float energy, wavelength = 16.0f;
+    // k - wave number = 2pi/wavelength, sigma is?, phase is phase, a is amplitude, angleR is the angle of the ray?
+    float sigma=40.0, k=2*M_PI/wavelength, phase=0.0, a=10.0, angleR;
+    vector<WavePoint> points;
+
+    Wave(float e, vec2 pos, vec2 dir) : energy(e), pos(pos), dir(dir) {
+        dir = normalize(dir);
+        for (float x = -sigma; x <= sigma; x+=0.1f) {
+            points.push_back({ pos + x*dir, dir*200.0f});
+        }
+        angleR = atan2(dir.y, dir.x);
+    }
+
+    void draw () {
+        glBegin(GL_LINE_STRIP);
+        for (WavePoint& p : points) {
+            // Perp. vector for sine displacement
+            vec2 perp(-p.dir.y, p.dir.x);
+            perp = normalize(perp);
+
+            // localpos is the x direction as a reference to where you are on the wave currently (for drawing stuff)
+            float y_displacement = a*sin(k*length(p.localPos) - phase);
+            vec2 drawPos = p.localPos + perp + y_displacement;
+            glVertex2f(drawPos.x, drawPos.y);
+        } glEnd;
+    }
+};
+
+
+/*
+********* Atom struct *********
+*/
 struct Atom {
     vec2 pos;
     int nElectrons;
-    float r = orbitDistance;
+    float r = orbitDistance, phase;
 
     vector<Particle> particles = {
         Particle(pos, 1)
@@ -111,31 +166,40 @@ struct Atom {
     Particle(vec2(pos.x - orbitDistance, pos.y), -1),
     */
     
-    Atom (vec2 pos, int nElectrons) : pos(pos), nElectrons(nElectrons) {
+    Atom (vec2 pos, int nElectrons, float phase = 0.0f) : pos(pos), nElectrons(nElectrons), phase(phase) {
         for (int i = 0; i < nElectrons; i++) {
-            float angle = 2.0 * M_PI * i / nElectrons;
+            float angle = 2.0 * M_PI * i / nElectrons + phase;
             float cx = r*cos(angle) + particles[0].pos.x;
             float cy = r*sin(angle) + particles[0].pos.y;
             particles.emplace_back(Particle(vec2(cx, cy), -1, angle));
         };
     }
+
+    static float excitationEnergy (int N1, int N2) {
+        return -13.6f / pow(N2, 2) - -13.6f / pow(N1, 2);
+    };
 };
+
+
 
 int main() {
 
+
+
     Engine engine;
 
-    /*vector<Particle> particles = {
-        Particle(vec2(0,0), 1),
-        Particle(vec2(-orbitDistance, 0.0f), -1),
-        Particle(vec2(orbitDistance, 0.0f), -1),
-    };*/
-    vector<Atom> atoms {
-        Atom(vec2( 100.0f,  100.0f), 4),
-        Atom(vec2(-100.0f, -100.0f), 3),
-        Atom(vec2( 100.0f, -100.0f), 7),
-        Atom(vec2(-100.0f,  100.0f), 11),
-    };
+    vector<Wave> waves {};
+    vector<Atom> atoms {};
+
+    for (int i=0; i < 13; i++) {
+        atoms.push_back(Atom(vec2(0.0f, i*50-300), 3, 20.0f));
+
+    }
+
+    // Initialize waves
+    for (int i=0; i < 20; i++) {
+        waves.push_back(Wave(Atom::excitationEnergy(1,2), vec2(-250.0f, i*10-200), vec2(-1.0f, 0.0f)));
+    }
 
     // Keep window open until you exit
     while (!glfwWindowShouldClose(engine.window)) {
