@@ -80,15 +80,15 @@ struct Particle {
         glColor3f(0.4f, 0.4f, 0.4f);
         if (charge==1) {for (int i = 0; i <= segments; i++) {
             float angle = 2.0f * M_PI * i/segments;
-            float x = orbitDistance * cos(angle);
-            float y = orbitDistance * sin(angle);
+            float x = orbitDistance * cos(angle) * n;
+            float y = orbitDistance * sin(angle) * n;
             glVertex2f(x + pos.x, y + pos.y);
         }; glEnd();}
 
 
 
         float r;
-        if      (charge == -1)   {r = 1.5f; glColor3f(0.0f, 0.7f, 1.0f);}
+        if      (charge == -1)   {r = 2.5f; glColor3f(0.0f, 0.7f, 1.0f);}
         else if (charge ==  1)   {r = 7.0f; glColor3f(1.0f, 0.0f, 0.0f);}
         else                     {r = 7.0f; glColor3f(0.5f, 0.5f, 0.5f);}
         
@@ -104,10 +104,10 @@ struct Particle {
     
     
     void update (vec2 center) {
-        float r = n * orbitDistance;
+        float r_u = n * orbitDistance;
         angle += 0.001;
-        pos= vec2(cos(angle) * r + center.x,
-                  sin(angle) * r + center.y);
+        pos= vec2(cos(angle) * r_u + center.x,
+                  sin(angle) * r_u + center.y);
     }
 
 };
@@ -166,9 +166,9 @@ struct Atom {
     Particle(vec2(pos.x - orbitDistance, pos.y), -1),
     */
     
-    Atom (vec2 pos, int nElectrons, float phase = 0.0f) : pos(pos), nElectrons(nElectrons), phase(phase) {
+    Atom (vec2 pos, int nElectrons, float phase) : pos(pos), nElectrons(nElectrons), phase(phase) {
         for (int i = 0; i < nElectrons; i++) {
-            float angle = 2.0 * M_PI * i / nElectrons + phase;
+            float angle = (2.0 * M_PI * i / nElectrons) + phase;
             float cx = r*cos(angle) + particles[0].pos.x;
             float cy = r*sin(angle) + particles[0].pos.y;
             particles.emplace_back(Particle(vec2(cx, cy), -1, angle));
@@ -191,9 +191,9 @@ int main() {
     vector<Wave> waves {};
     vector<Atom> atoms {};
 
-    for (int i=0; i < 13; i++) {
-        atoms.push_back(Atom(vec2(0.0f, i*50-300), 3, 20.0f));
 
+    for (int i=0; i < 13; i++) {
+        atoms.push_back(Atom(vec2(0.0f, i*50-300), 4, radians(i*20.0f)));
     }
 
     // Initialize waves
@@ -208,8 +208,21 @@ int main() {
         for (Atom& a : atoms) {
             for (Particle& p : a.particles) { // the "&" after the object means that we are referencing the actual object instead of a copy which means that, if we don't have the & we dont update the original object, jsut the copy of the object. 
                 p.draw();
+
                 if (p.charge == -1) {
                     p.update(a.particles[0].pos);
+
+                    for (Wave& w : waves) {
+                        for (WavePoint& wp : w.points) {
+                            float dist = length(p.pos - wp.localPos);
+                            float energyforExcitation = Atom::excitationEnergy(p.n, p.n+1);
+                            if (dist < 20 && w.energy == energyforExcitation) {
+                                w.energy=0.0f; // absorb photon
+                                p.n += 1;      // excite electron
+                                break; // so one photon doesn't trigger several energy increases
+                            } 
+                        }
+                    }
                 }
             }
         }
