@@ -59,31 +59,39 @@ struct Engine {
     };
 };
 
+Engine engine;
 
 
 /*
 ********* General Particle struct *********
 */
 struct Particle {
+    std::random_device rd;
+    std::mt19937 gen(rd());
     vec2 pos;
     int charge;
     float angle;
     int n = 1; // energy level of particle. for hydrogen, energy of a level is -13.6/n**2 eV
+    float excitationTimer = 0.0f;
 
     Particle(vec2 pos, int charge, float angle = 0.0f) : pos(pos), charge(charge), angle(angle) {}
 
-    void draw (int segments = 50) {
+    void draw (vec2 atomCenter, int segments = 50) {
 
         // Draw outline for orbit
-        glLineWidth(0.4f);
-        glBegin(GL_LINE_LOOP);
-        glColor3f(0.4f, 0.4f, 0.4f);
-        if (charge==1) {for (int i = 0; i <= segments; i++) {
-            float angle = 2.0f * M_PI * i/segments;
-            float x = orbitDistance * cos(angle) * n;
-            float y = orbitDistance * sin(angle) * n;
-            glVertex2f(x + pos.x, y + pos.y);
-        }; glEnd();}
+        
+        
+        if (charge == -1) {
+            float r = orbitDistance * n;
+            glLineWidth(0.4f);
+            glBegin(GL_LINE_LOOP);
+            glColor3f(0.4f, 0.4f, 0.4f);
+            for (int i = 0; i <= segments; i++) {
+                float angle = 2.0f * M_PI * i/segments;
+                float x = cos(angle) * r;
+                float y = sin(angle) * r;
+                glVertex2f(x + atomCenter.x, y + atomCenter.y);
+            }; glEnd();}
 
 
 
@@ -105,9 +113,21 @@ struct Particle {
     
     void update (vec2 center) {
         float r_u = n * orbitDistance;
-        angle += 0.001;
+        angle += 0.01;
         pos= vec2(cos(angle) * r_u + center.x,
                   sin(angle) * r_u + center.y);
+
+        if (excitationTimer == 0.0f && n > 1) {
+            n--;
+            // --- Create a new photon when excitation goes back down ---
+            excitationTimer +=0.003;
+            double randAngle = std::uniform_real_distribution<> (0.0f, M_PI);
+            float waveDirX = cos(randAngle);
+            float waveDirY = sin(randAngle);
+            float eDiff = Atom::excitationEnergy(n, n+1);
+            waves.push_back(eDiff, pos, vec2(waveDirX, waveDirY));
+            
+        }
     }
 
 };
@@ -142,9 +162,18 @@ struct Wave {
 
             // localpos is the x direction as a reference to where you are on the wave currently (for drawing stuff)
             float y_displacement = a*sin(k*length(p.localPos) - phase);
-            vec2 drawPos = p.localPos + perp + y_displacement;
+            vec2 drawPos = p.localPos + perp * y_displacement;
             glVertex2f(drawPos.x, drawPos.y);
-        } glEnd;
+        } glEnd();
+    }
+
+    void update (float dt) {
+        phase += 30.0f*dt;
+
+        for (WavePoint& p : points) {
+            // move along velocity
+            p.localPos += p.dir * dt;   // Move wave point forward in the wave direction by dt
+        }
     }
 };
 
@@ -157,14 +186,10 @@ struct Atom {
     int nElectrons;
     float r = orbitDistance, phase;
 
+    // Add one proton for a hydrogen
     vector<Particle> particles = {
         Particle(pos, 1)
     };
-
-    /* this works for one electron, use angle instead when creating a dynamical amount of electrons
-    Particle(pos, 1),
-    Particle(vec2(pos.x - orbitDistance, pos.y), -1),
-    */
     
     Atom (vec2 pos, int nElectrons, float phase) : pos(pos), nElectrons(nElectrons), phase(phase) {
         for (int i = 0; i < nElectrons; i++) {
@@ -176,6 +201,9 @@ struct Atom {
     }
 
     static float excitationEnergy (int N1, int N2) {
+        /*
+        The energy needed to excite an electron from energy state N1 to N2 in a hydrogen atom
+        */
         return -13.6f / pow(N2, 2) - -13.6f / pow(N1, 2);
     };
 };
@@ -184,21 +212,18 @@ struct Atom {
 
 int main() {
 
-
-
-    Engine engine;
-
     vector<Wave> waves {};
     vector<Atom> atoms {};
 
 
     for (int i=0; i < 13; i++) {
-        atoms.push_back(Atom(vec2(0.0f, i*50-300), 4, radians(i*20.0f)));
+        atoms.push_back(Atom(vec2(0.0f, i*50-300), 1, radians(i*20.0f)));
     }
-
+    float eH = engine.HEIGHT, eW = engine.WIDTH;
     // Initialize waves
-    for (int i=0; i < 20; i++) {
-        waves.push_back(Wave(Atom::excitationEnergy(1,2), vec2(-250.0f, i*10-200), vec2(-1.0f, 0.0f)));
+    int nWaves = 20;
+    for (int i=0; i < nWaves; i++) {
+        waves.push_back(Wave(Atom::excitationEnergy(1,2), vec2(eW / 2.0f, i*(eH/nWaves)-eH/2.0f), vec2(-1.0f, 0.0f)));
     }
 
     // Keep window open until you exit
@@ -207,18 +232,23 @@ int main() {
 
         for (Atom& a : atoms) {
             for (Particle& p : a.particles) { // the "&" after the object means that we are referencing the actual object instead of a copy which means that, if we don't have the & we dont update the original object, jsut the copy of the object. 
-                p.draw();
+                p.draw(a.pos);
 
                 if (p.charge == -1) {
-                    p.update(a.particles[0].pos);
+
+                    if (p.excitationTimer > 0.0f) {
+                        p.excitationTimer -= -0.001f
+                    }
+                    p.update(a.pos);
 
                     for (Wave& w : waves) {
                         for (WavePoint& wp : w.points) {
                             float dist = length(p.pos - wp.localPos);
                             float energyforExcitation = Atom::excitationEnergy(p.n, p.n+1);
-                            if (dist < 20 && w.energy == energyforExcitation) {
+                            if (dist < 20.0f && w.energy == energyforExcitation) {
                                 w.energy=0.0f; // absorb photon
                                 p.n += 1;      // excite electron
+                                p.excitationTimer += 0.003f;
                                 break; // so one photon doesn't trigger several energy increases
                             } 
                         }
@@ -227,7 +257,12 @@ int main() {
             }
         }
 
-
+        // Draw waves
+        for (Wave& w : waves) {
+            if (w.energy == 0.0f) continue;
+            w.draw();
+            w.update(0.01f);
+        }
 
         glfwSwapBuffers(engine.window);
         glfwPollEvents();
